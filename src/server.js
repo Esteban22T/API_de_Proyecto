@@ -1,33 +1,38 @@
 require('dotenv').config();
 
 if (!process.env.DATABASE_URL) {
-  throw new Error(
-    'Falta DATABASE_URL. Configúrala en node-api-postgres/.env.',
-  );
+  console.error('DATABASE_URL is required.');
+  process.exit(1);
 }
 
 const app = require('./app');
-const { initializeDatabase, pool } = require('./db');
-
+const pool = require('./config/db');
 const port = Number(process.env.PORT) || 3000;
+const server = app.listen(port, () => {
+  console.log(`EKO+ API listening on port ${port}.`);
+});
 
-async function startServer() {
-  await initializeDatabase();
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`API lista en http://localhost:${port}`);
+let isShuttingDown = false;
+
+function shutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`${signal} received. Closing HTTP server and database pool.`);
+
+  server.close(async (error) => {
+    if (error) {
+      console.error('Error closing HTTP server:', error);
+      process.exitCode = 1;
+    }
+
+    try {
+      await pool.end();
+    } catch (poolError) {
+      console.error('Error closing PostgreSQL pool:', poolError);
+      process.exitCode = 1;
+    }
   });
 }
 
-startServer().catch(async (error) => {
-  console.error('No se pudo iniciar la API:', error);
-  await pool.end();
-  process.exitCode = 1;
-});
-
-async function shutDown() {
-  await pool.end();
-  process.exit(0);
-}
-
-process.on('SIGINT', shutDown);
-process.on('SIGTERM', shutDown);
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
